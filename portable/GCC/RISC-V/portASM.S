@@ -168,11 +168,14 @@ definitions. */
 
 .global vPortStartFirstTask
 .global freertos_risc_v_trap_handler
-.global pxPortInitialiseStack
+.global pxPortAsmInitialiseStack
+
 .extern pxCurrentTCB
 .extern ulPortTrapHandler
 .extern vTaskSwitchContext
 .extern xTaskIncrementTick
+.extern vPortPmpSwitch
+.extern vPortUpdatePrivilegeStatus
 .extern pullMachineTimerCompareRegister
 .extern pullNextTime
 .extern uxTimerIncrementsForOneTick /* size_t type so 32-bit on 32-bit core and 64-bits on 64-bit core. */
@@ -435,7 +438,7 @@ handle_exception:
 	addi	t0, t0, -8
 	blt		t0, x0, is_exception /* mcause < 8, must be fault */
 	addi	t0, t0, -4
-	blt		t0, x0, ecall_yield
+	blt		t0, x0, environment_switch
 
 is_exception:
 	/* restore t0 and save sp in mscratch. */
@@ -459,6 +462,59 @@ is_exception:
 	portRESTORE_BaseReg
 	load_x  x2, PORT_CONTEXT_xOFFSET(2)(sp)
 	mret
+
+environment_switch:
+	/* check parameter a0 [0..4] */
+	li t0, 4
+	bgt	a0,	t0,	ecall_end
+	/* switch to appropriate ecall */
+	la t0, 1f
+	slli	a0, a0, 2
+	add t0, t0, a0
+	jr t0
+1:
+	jal x0, ecall_yield
+	jal x0, ecall_disable_interrupt
+	jal x0, ecall_enable_interrupt
+	jal x0, ecall_switch_to_machine
+	jal x0, ecall_switch_to_user
+
+ecall_disable_interrupt:
+	/* Clear mpie */
+	li a0, 0x80
+	csrc mstatus, a0
+	j ecall_mret
+
+ecall_enable_interrupt:
+	/* Set mpie */
+	li a0, 0x80
+	csrs mstatus, a0
+	j ecall_mret
+
+ecall_switch_to_machine:
+	/* Set mpp */
+	li a0, 0x1800
+	csrs mstatus, a0
+	j ecall_mret
+
+ecall_switch_to_user:
+	/* Clear mpp */
+	li a0, 0x1800
+	csrc mstatus, a0
+	j ecall_mret
+
+ecall_mret:
+	/* Synchronous so updated exception return address to the instruction after the instruction that generated the exeption. */
+	csrr t0, mepc
+	addi t0, t0, 4
+	csrw mepc, t0
+	/* restore t0 */
+	csrr t0, mscratch
+	mret
+
+ecall_end:
+        /* unauthorized ecall */
+        j       unrecoverable_error
  
 ecall_yield:
 	/* restore t0 */
@@ -584,11 +640,17 @@ switch_context:
 	jal	vTaskSwitchContext
 	load_x s0, pxCurrentTCB			/* Load pxCurrentTCB. */
 	load_x  sp, 0( s0 )				/* Read sp from first TCB member. */
+	
+	jal vPortPmpSwitch   
 
 end_trap_handler:	
 	load_x s0, pxCurrentTCB			/* Load pxCurrentTCB. */
 	load_x  t1, PORT_CONTEXT_xOFFSET(2)(sp)
 	store_x  t1, 0( s0 )			/* Write sp saved value to first TCB member. */
+
+	/* Update privilege_status if needed */
+	load_x  a0, PORT_CONTEXT_mstatusOFFSET(sp)
+	jal vPortUpdatePrivilegeStatus
 
 	/* restore registers */
 	portRESTORE_FpuReg
@@ -602,18 +664,25 @@ end_trap_handler:
 .align 8
 .func
 vPortStartFirstTask:
-
-#if( portasmHAS_SIFIVE_CLINT != 0 )
-	/* If there is a clint then interrupts can branch directly to the FreeRTOS
-	trap handler.  Otherwise the interrupt controller will need to be configured
-	outside of this file. */
-	la t0, freertos_risc_v_trap_handler
-	csrw mtvec, t0
-#endif /* ( portasmHAS_SIFIVE_CLINT != 0 ) */
+	#if( portasmHAS_SIFIVE_CLINT != 0 )
+		/* If there is a clint then interrupts can branch directly to the FreeRTOS
+		trap handler.  Otherwise the interrupt controller will need to be configured
+		outside of this file. */
+		la t0, freertos_risc_v_trap_handler
+		csrw mtvec, t0
+	#endif /* ( portasmHAS_SIFIVE_CLINT != 0 ) */
 
 	/** Set all register to the FirstTask context */
 	load_x  t2, pxCurrentTCB			/* Load pxCurrentTCB. */
 	load_x  sp, 0( t2 )				 	/* Read sp from first TCB member. */
+
+	/* Update privilege_status if needed */
+	load_x  a0, PORT_CONTEXT_mstatusOFFSET(sp)
+	jal vPortUpdatePrivilegeStatus
+
+	jal vPortPmpSwitch
+	
+	load_x  t2, pxCurrentTCB                        /* Load pxCurrentTCB. */
 
 	/* Restore first TCB member */
 	load_x  t1,  PORT_CONTEXT_xOFFSET(2)(sp)
@@ -715,16 +784,7 @@ vPortStartFirstTask:
  */
 .align 8
 .func
-pxPortInitialiseStack:
-
-	csrr t0, mstatus					/* Obtain current mstatus value. */
-	andi t0, t0, ~0x8					/* Ensure interrupts are disabled when the stack is restored within an ISR.  Required when a task is created after the schedulre has been started, otherwise interrupts would be disabled anyway. */
-	addi t1, x0, 0x188					/* Generate the value 0x1880, which are the MPIE and MPP bits to set in mstatus. */
-	slli t1, t1, 4
-	not t2, t1							/* reset previous value */
-	and t0, t0, t2
-	or t0, t0, t1						/* Set MPIE and MPP bits in mstatus value. */
-
+pxPortAsmInitialiseStack:
 	/* Make room for the registers. */
 	addi	t2, a0, -portasmREGISTER_CONTEXT_WORDSIZE
 	
@@ -763,7 +823,8 @@ pxPortInitialiseStack:
 #endif /* __riscv_32e */
 
 	store_x a1, PORT_CONTEXT_mepcOFFSET(t2)
-	store_x t0, PORT_CONTEXT_mstatusOFFSET(t2)
+
+	store_x a3, PORT_CONTEXT_mstatusOFFSET(t2)
 
 	/* The number of additional registers. */
 	addi t0, x0, portasmADDITIONAL_CONTEXT_SIZE 
