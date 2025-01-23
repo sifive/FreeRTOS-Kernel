@@ -59,7 +59,30 @@
 #endif
 #define portICONTEXT_SIZE ( portIREG_COUNT * portWORD_SIZE )
 
-#define portCONTEXT_SIZE               ( portICONTEXT_SIZE )
+#ifdef portasmSTORE_F_CONTEXT
+ #ifdef __riscv_fdiv
+  #if __riscv_flen == 32
+   #define portFREG_SIZE 4U
+   #define load_f                     flw
+   #define store_f                    fsw
+  #elif __riscv_flen == 64
+   #define portFREG_SIZE 8U
+   #define load_f                     fld
+   #define store_f                    fsd
+  #else
+   #error Assembler did not define __riscv_flen
+  #endif
+  #define portFREG_COUNT 33 /* 32 Floating point registers plus one CSR */
+  #define portFREG_OFFSET(_freg_) (_freg_ * portFREG_SIZE + portICONTEXT_SIZE)
+  #define portFCONTEXT_SIZE (portFREG_SIZE * portFREG_COUNT)
+#else
+  #define portFCONTEXT_SIZE 0
+#endif
+#else
+  #define portFCONTEXT_SIZE 0
+#endif
+
+#define portCONTEXT_SIZE               ( portICONTEXT_SIZE + portFCONTEXT_SIZE )
 /*-----------------------------------------------------------*/
 
 .extern pxCurrentTCB
@@ -197,6 +220,9 @@ store_x t0, portCRITICAL_NESTING_OFFSET * portWORD_SIZE( sp ) /* Store the criti
 
 csrr t0, mstatus /* Required for MPIE bit. */
 store_x t0, portMSTATUS_OFFSET * portWORD_SIZE( sp )
+#ifdef portasmSTORE_F_CONTEXT
+portcontexSAVE_FPU_CONTEXT_INTERNAL
+#endif /* ifdef portasmSTORE_F_CONTEXT */
 
 
 portasmSAVE_ADDITIONAL_REGISTERS /* Defined in freertos_risc_v_chip_specific_extensions.h to save any registers unique to the RISC-V implementation. */
@@ -236,6 +262,10 @@ csrw mepc, t0
 
 /* Defined in freertos_risc_v_chip_specific_extensions.h to restore any registers unique to the RISC-V implementation. */
 portasmRESTORE_ADDITIONAL_REGISTERS
+
+#ifdef portasmSTORE_F_CONTEXT
+    portasmRESTORE_FPU_CONTEXT_INTERNAL
+#endif /* ifdef portasmSTORE_F_CONTEXT */
 
 /* Load mstatus with the interrupt enable bits used by the task. */
 load_x t0, portMSTATUS_OFFSET * portWORD_SIZE( sp )
