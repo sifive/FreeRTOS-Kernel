@@ -68,6 +68,96 @@
    .extern pxCriticalNesting
 /*-----------------------------------------------------------*/
 
+    .macro portcontexSAVE_FPU_CONTEXT_INTERNAL
+/* Check if the FPU has been used, if it has not, skip the context save */
+srl t1, t0, 14
+andi t1, t1, 1
+beqz t1, 1f   /* The FPU has not been used (FS either initial or clean), skip context save */
+/* Store the fp registers */
+store_f f0, portFREG_OFFSET(0)( sp )
+store_f f1, portFREG_OFFSET(1)( sp )
+store_f f2, portFREG_OFFSET(2)( sp )
+store_f f3, portFREG_OFFSET(3)( sp )
+store_f f4, portFREG_OFFSET(4)( sp )
+store_f f5, portFREG_OFFSET(5)( sp )
+store_f f6, portFREG_OFFSET(6)( sp )
+store_f f7, portFREG_OFFSET(7)( sp )
+store_f f8, portFREG_OFFSET(8)( sp )
+store_f f9, portFREG_OFFSET(9)( sp )
+store_f f10, portFREG_OFFSET(10)( sp )
+store_f f11, portFREG_OFFSET(11)( sp )
+store_f f12, portFREG_OFFSET(12)( sp )
+store_f f13, portFREG_OFFSET(13)( sp )
+store_f f14, portFREG_OFFSET(14)( sp )
+store_f f15, portFREG_OFFSET(15)( sp )
+store_f f16, portFREG_OFFSET(16)( sp )
+store_f f17, portFREG_OFFSET(17)( sp )
+store_f f18, portFREG_OFFSET(18)( sp )
+store_f f19, portFREG_OFFSET(19)( sp )
+store_f f20, portFREG_OFFSET(20)( sp )
+store_f f21, portFREG_OFFSET(21)( sp )
+store_f f22, portFREG_OFFSET(22)( sp )
+store_f f23, portFREG_OFFSET(23)( sp )
+store_f f24, portFREG_OFFSET(24)( sp )
+store_f f25, portFREG_OFFSET(25)( sp )
+store_f f26, portFREG_OFFSET(26)( sp )
+store_f f27, portFREG_OFFSET(27)( sp )
+store_f f28, portFREG_OFFSET(28)( sp )
+store_f f29, portFREG_OFFSET(29)( sp )
+store_f f30, portFREG_OFFSET(30)( sp )
+store_f f31, portFREG_OFFSET(31)( sp )
+csrr t0, fcsr
+store_x t0, portFREG_OFFSET(32)( sp )
+/* Mark the FPU as clean */
+li t1, ~(3 << 13)
+and t0, t0, t1
+li t1, (1 << 14)
+or t0, t0, t1
+csrw mstatus, t0
+1:
+    .endm
+/*-----------------------------------------------------------*/
+
+    .macro portasmRESTORE_FPU_CONTEXT_INTERNAL
+/* Restore fp registers from context */
+load_f f1, portFREG_OFFSET(0)( sp )
+load_f f1, portFREG_OFFSET(1)( sp )
+load_f f2, portFREG_OFFSET(2)( sp )
+load_f f3, portFREG_OFFSET(3)( sp )
+load_f f4, portFREG_OFFSET(4)( sp )
+load_f f5, portFREG_OFFSET(5)( sp )
+load_f f6, portFREG_OFFSET(6)( sp )
+load_f f7, portFREG_OFFSET(7)( sp )
+load_f f8, portFREG_OFFSET(8)( sp )
+load_f f9, portFREG_OFFSET(9)( sp )
+load_f f10, portFREG_OFFSET(10)( sp )
+load_f f11, portFREG_OFFSET(11)( sp )
+load_f f12, portFREG_OFFSET(12)( sp )
+load_f f13, portFREG_OFFSET(13)( sp )
+load_f f14, portFREG_OFFSET(14)( sp )
+load_f f15, portFREG_OFFSET(15)( sp )
+load_f f16, portFREG_OFFSET(16)( sp )
+load_f f17, portFREG_OFFSET(17)( sp )
+load_f f18, portFREG_OFFSET(18)( sp )
+load_f f19, portFREG_OFFSET(19)( sp )
+load_f f20, portFREG_OFFSET(20)( sp )
+load_f f21, portFREG_OFFSET(21)( sp )
+load_f f22, portFREG_OFFSET(22)( sp )
+load_f f23, portFREG_OFFSET(23)( sp )
+load_f f24, portFREG_OFFSET(24)( sp )
+load_f f25, portFREG_OFFSET(25)( sp )
+load_f f26, portFREG_OFFSET(26)( sp )
+load_f f27, portFREG_OFFSET(27)( sp )
+load_f f28, portFREG_OFFSET(28)( sp )
+load_f f29, portFREG_OFFSET(29)( sp )
+load_f f30, portFREG_OFFSET(30)( sp )
+load_f f31, portFREG_OFFSET(31)( sp )
+load_x t0, portFREG_OFFSET(32)( sp )
+csrw fcsr, t0
+1:
+    .endm
+/*-----------------------------------------------------------*/
+
    .macro portcontextSAVE_CONTEXT_INTERNAL
 addi sp, sp, -portCONTEXT_SIZE
 store_x x1, 1 * portWORD_SIZE( sp )
